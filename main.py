@@ -2,17 +2,47 @@ import os
 import telebot
 from flask import Flask, request
 
-# --- [ تنظیمات / Settings ] ---
+# --- [ Settings ] ---
 BOT_TOKEN = "8790363458:AAFRIqgm_E-0bdIKment7fbEtPqQfknieME"
 RENDER_URL = "https://viva-bot-vuvy.onrender.com" 
 
 CHANNELS = ['old_love2024', 'tab_ib']
+ALL_TYPES =
+
 bot = telebot.TeleBot(BOT_TOKEN, threaded=True)
 app = Flask(__name__)
 
+# --- [ Helper Functions ] ---
+
+def check_join(user_id):
+    for channel in CHANNELS:
+        try:
+            status = bot.get_chat_member(f"@{channel}", user_id).status
+            if status in ['left', 'kicked']: return False
+        except: continue
+    return True
+
+def get_lang_markup():
+    """زبان منتخب کرنے کے بٹن (تصویر کے مطابق)"""
+    markup = telebot.types.InlineKeyboardMarkup(row_width=3)
+    btn_fa = telebot.types.InlineKeyboardButton("فارسی 🇦🇫🇮🇷", callback_data="lang_fa")
+    btn_en = telebot.types.InlineKeyboardButton("English 🇬🇧", callback_data="lang_en")
+    btn_ar = telebot.types.InlineKeyboardButton("العربية 🇸🇦", callback_data="lang_ar")
+    markup.add(btn_fa, btn_en, btn_ar)
+    return markup
+
+def get_join_markup():
+    """جوائننگ بٹن (تصویر کے مطابق)"""
+    markup = telebot.types.InlineKeyboardMarkup(row_width=2)
+    btns = [telebot.types.InlineKeyboardButton(f"📢 Join @{ch}", url=f"https://t.me{ch}") for ch in CHANNELS]
+    markup.add(*btns)
+    markup.add(telebot.types.InlineKeyboardButton("✅ تایید عضویت", callback_data="check_membership"))
+    return markup
+
+# --- [ Webhook Routes ] ---
+
 @app.route('/')
-def home(): 
-    return "Viva Bot is High Speed & Online!", 200
+def home(): return "Viva Bot is Active!", 200
 
 @app.route('/' + BOT_TOKEN, methods=['POST'])
 def get_message():
@@ -23,50 +53,51 @@ def get_message():
         return "!", 200
     return "Forbidden", 403
 
-# --- [ تابع چک کردن عضویت اجباری ] ---
-def check_join(user_id):
-    for channel in CHANNELS:
-        try:
-            status = bot.get_chat_member(f"@{channel}", user_id).status
-            if status == 'left':
-                return False
-        except:
-            continue
-    return True
+# --- [ Handlers ] ---
 
-# --- [ ہینڈلرز / Handlers ] ---
-@bot.message_handler(commands=['start'])
-def start(message):
+@bot.callback_query_handler(func=lambda call: call.data.startswith('lang_') or call.data == "check_membership")
+def callback_handler(call):
+    if call.data == "check_membership":
+        if check_join(call.from_user.id):
+            bot.answer_callback_query(call.id, "✅ خوش آمدید!")
+            bot.edit_message_text("🔥 **ثبت شد!**\nحالا نام آهنگ یا لینک را بفرستید.", call.message.chat.id, call.message.message_id)
+        else:
+            bot.answer_callback_query(call.id, "❌ هنوز عضو نشدید!", show_alert=True)
+    
+    elif call.data.startswith('lang_'):
+        bot.answer_callback_query(call.id, "Language Selected!")
+        bot.edit_message_text("✅ زبان انتخاب شد. اکنون می‌توانید از ربات استفاده کنید.", call.message.chat.id, call.message.message_id)
+
+@bot.message_handler(content_types=ALL_TYPES)
+def main_handler(message):
+    # ۱. ہر میسج پر سفید کبوتر (🕊️) کا ری ایکشن
+    try:
+        bot.set_message_reaction(message.chat.id, message.message_id, [telebot.types.ReactionTypeEmoji('🕊')], is_big=False)
+    except: pass
+
+    # ۲. ممبرشپ چیک کرنا
     if not check_join(message.from_user.id):
-        markup = telebot.types.InlineKeyboardMarkup()
-        for ch in CHANNELS:
-            markup.add(telebot.types.InlineKeyboardButton(f"Join {ch}", url=f"https://t.me{ch}"))
-        markup.add(telebot.types.InlineKeyboardButton("✅ عضو شدم / Joined", url=f"https://t.me{bot.get_me().username}?start=true"))
-        return bot.send_message(message.chat.id, "❌ **لطفاً ابتدا عضو کانال‌های ما شوید:**", reply_markup=markup)
+        text = "🔒 لطفاً ابتدا در کانال‌ها عضو شوید سپس تایید را بزنید"
+        return bot.send_message(message.chat.id, text, reply_markup=get_join_markup())
 
-    welcome_text = (
-        "🔥 **𝙑𝙄𝙑𝘼 𝙂𝙇𝙊𝘽𝘼𝙇 𝘽𝙊𝙏** 🔥\n"
-        "━━━━━━━━━━━━━━\n"
-        "👋 سلام! به پیشرفته‌ترین دستیار هوشمند خوش‌آمدی\n"
-        "نام آهنگ را بفرستید یا لینک را وارد کنید."
-    )
-    bot.send_message(message.chat.id, welcome_text)
+    # ۳. اسٹارٹ کمانڈ اور زبان کا انتخاب
+    if message.text == "/start":
+        text = "🌐 Please select your language\n🌐 لطفاً زبان خود را انتخاب نمایید\n🌐 يرجى اختيار لغتك"
+        bot.send_message(message.chat.id, text, reply_markup=get_lang_markup())
+    
+    # ۴. لنک اور اسٹوری پروسیسنگ
+    elif message.content_type == 'story':
+        bot.reply_to(message, "📥 استوری شناسایی شد! در حال پردازش...")
+    
+    elif message.text and "http" in message.text:
+        bot.send_chat_action(message.chat.id, 'upload_audio')
+        try:
+            bot.send_audio(message.chat.id, audio=message.text, caption="🎵 تقدیم به شما!")
+        except:
+            bot.reply_to(message, "❌ لینک معتبر نیست.")
 
-@bot.message_handler(func=lambda m: True)
-def handle_all_messages(message):
-    if "http" in message.text:
-        bot.reply_to(message, "📥 لینک شناسایی شد! در حال آماده‌سازی...")
-    else:
-        # شبیه‌سازی پیدا شدن آهنگ
-        song_name = message.text
-        markup = telebot.types.InlineKeyboardMarkup()
-        markup.add(telebot.types.InlineKeyboardButton("🎵 دریافت آهنگ (MP3)", callback_data=f"dl_{song_name}"))
-        bot.send_message(message.chat.id, f"🎧 آهنگ **{song_name}** پیدا شد!", reply_markup=markup)
-
+# --- [ Start ] ---
 if __name__ == '__main__':
-    # تنظیم وب‌هوک
     bot.remove_webhook()
     bot.set_webhook(url=f"{RENDER_URL}/{BOT_TOKEN}")
-    
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
